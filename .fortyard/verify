@@ -1,0 +1,3 @@
+#!/bin/sh
+# Verification runs the landing check, with its X server.
+exec "$(dirname "$0")/check" "$@"
