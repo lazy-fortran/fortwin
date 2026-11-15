@@ -9,7 +9,6 @@ description = "Windows, keyboard, pointer and clipboard on X11 in Fortran"
 [build]
 auto-executables = false
 auto-tests = true
-link = ["xcb"]
 
 [fortran]
 implicit-typing = false

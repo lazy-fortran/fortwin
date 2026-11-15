@@ -96,6 +96,7 @@ contains
             int(z'00008000', c_int32_t) + int(z'00020000', c_int32_t) + & ! Exposure, StructureNotify
             int(z'00200000', c_int32_t) + int(z'00400000', c_int32_t) ! FocusChange, PropertyChange
         ok = .false.
+        if (.not. xcb_load()) return
         win%conn = xcb_connect(c_null_ptr, nscreen)
         if (xcb_connection_has_error(win%conn) /= 0) then
             call xcb_disconnect(win%conn)

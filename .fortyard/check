@@ -1,5 +1,6 @@
 #!/bin/sh
-# The window test needs an X server and libxcb; the runner image has neither,
+# The window test needs an X server and libxcb (opened at run time); the runner
+# image has neither,
 # so Xvfb and libxcb come from conda-forge into a prefix kept between checks.
 set -eu
 version=2.10.0-0
@@ -13,6 +14,5 @@ if [ ! -x "$root/env/bin/Xvfb" ]; then
         -c conda-forge xorg-xvfb-server libxcb
 fi
 export PATH="$root/env/bin:$PATH"
-export LIBRARY_PATH="$root/env/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
 export LD_LIBRARY_PATH="$root/env/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fo test --all "$@"

@@ -1,6 +1,7 @@
 # fortwin
 
-Windows on X11 in Fortran, through libxcb only: one window with keyboard,
+Windows on X11 in Fortran, through libxcb only, which is opened at run time
+(a program that never opens a window needs no X libraries): one window with keyboard,
 pointer, wheel, clipboard and primary selection, title, size, maximisation,
 visibility and display scale, and a wait that other threads can end.
 
