@@ -256,8 +256,8 @@ contains
     end subroutine expect_text
 
     subroutine expect_shortcut(w, codepoint, mods, what)
-        !! Key down with the character and modifiers, then its release, and no
-        !! text in between.
+        !! Key down with the character and modifiers, not marked as a repeat,
+        !! then its release, and no text in between.
         type(window_t), intent(inout) :: w
         integer, intent(in) :: codepoint, mods
         character(*), intent(in) :: what
@@ -271,7 +271,7 @@ contains
         do while (win_time() - t < 1.0d0 .and. .not. up)
             do while (win_next_event(w, ev))
                 if (ev%kind == WIN_EV_KEY_DOWN .and. ev%codepoint == codepoint .and. &
-                    iand(ev%mods, mods) == mods) down = .true.
+                    iand(ev%mods, mods) == mods .and. .not. ev%repeat) down = .true.
                 if (ev%kind == WIN_EV_KEY_UP .and. ev%codepoint == codepoint) up = .true.
                 if (ev%kind == WIN_EV_TEXT) text = .true.
             end do

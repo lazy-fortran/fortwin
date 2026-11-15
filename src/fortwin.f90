@@ -385,7 +385,8 @@ contains
                 end if
             end if
             if (kind == 2) then
-                call key_press(win, detail, state, win%down(detail))
+                ! A copy: key_press marks the key as down before it reads repeat.
+                call key_press(win, detail, state, (win%down(detail)))
             else
                 call key_release(win, detail)
             end if
