@@ -92,6 +92,13 @@ module fortwin_xcb
             integer(c_int16_t), value :: mask
             integer(c_int32_t), intent(in) :: values(*)
         end function
+        type(xcb_cookie_t) function fn_xcb_change_window_attributes(c, w, mask, values) &
+                bind(C)
+            import :: c_ptr, c_int32_t, xcb_cookie_t
+            type(c_ptr), value :: c
+            integer(c_int32_t), value :: w, mask
+            integer(c_int32_t), intent(in) :: values(*)
+        end function
         type(xcb_cookie_t) function fn_xcb_change_property(c, mode, w, prop, typ, fmt, n, data) &
                 bind(C)
             import :: c_ptr, c_int8_t, c_int32_t, xcb_cookie_t
@@ -183,6 +190,8 @@ module fortwin_xcb
     procedure(fn_xcb_map_window), pointer :: xcb_map_window => null()
     procedure(fn_xcb_unmap_window), pointer :: xcb_unmap_window => null()
     procedure(fn_xcb_configure_window), pointer :: xcb_configure_window => null()
+    procedure(fn_xcb_change_window_attributes), pointer :: &
+        xcb_change_window_attributes => null()
     procedure(fn_xcb_change_property), pointer :: xcb_change_property => null()
     procedure(fn_xcb_delete_property), pointer :: xcb_delete_property => null()
     procedure(fn_xcb_get_property), pointer :: xcb_get_property => null()
@@ -264,6 +273,8 @@ contains
         call c_f_procpointer(dlsym(lib, "xcb_map_window" // c_null_char), xcb_map_window)
         call c_f_procpointer(dlsym(lib, "xcb_unmap_window" // c_null_char), xcb_unmap_window)
         call c_f_procpointer(dlsym(lib, "xcb_configure_window" // c_null_char), xcb_configure_window)
+        call c_f_procpointer(dlsym(lib, "xcb_change_window_attributes" // c_null_char), &
+            xcb_change_window_attributes)
         call c_f_procpointer(dlsym(lib, "xcb_change_property" // c_null_char), xcb_change_property)
         call c_f_procpointer(dlsym(lib, "xcb_delete_property" // c_null_char), xcb_delete_property)
         call c_f_procpointer(dlsym(lib, "xcb_get_property" // c_null_char), xcb_get_property)

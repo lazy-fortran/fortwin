@@ -12,7 +12,8 @@ module fortwin
     implicit none
     private
     public :: window_t, win_event_t, win_open, win_close, win_next_event, win_wait, &
-        win_wake, win_set_title, win_set_size, win_set_visible, win_maximize, &
+        win_wake, win_set_title, win_set_size, win_set_visible, win_set_background, &
+        win_maximize, &
         win_clipboard_set, win_clipboard_get, win_primary_set, win_primary_get, win_flush, &
         win_mods_down, win_time, win_send_key
     public :: WIN_EV_NONE, WIN_EV_CLOSE, WIN_EV_RESIZE, WIN_EV_EXPOSE, WIN_EV_MOTION, &
@@ -201,6 +202,23 @@ contains
         ck = xcb_configure_window(win%conn, win%id, int(4 + 8, c_int16_t), values)
         if (xcb_flush(win%conn) > 0) continue
     end subroutine win_set_size
+
+    subroutine win_set_background(win, rgb)
+        !! The colour the X server fills the window with where nothing is drawn
+        !! yet: when it is mapped and where a resize uncovers it. Without one, a
+        !! compositor shows a freshly mapped window white until its first frame.
+        !! rgb are 0 to 1 and map to a 24-bit TrueColor pixel.
+        type(window_t), intent(inout) :: win
+        real, intent(in) :: rgb(3)
+        integer(c_int32_t) :: values(1)
+        integer :: c(3)
+        type(xcb_cookie_t) :: ck
+        c = nint(255.0 * max(0.0, min(1.0, rgb)))
+        values(1) = int(c(1) * 65536 + c(2) * 256 + c(3), c_int32_t)
+        ! CW_BACK_PIXEL
+        ck = xcb_change_window_attributes(win%conn, win%id, 2_c_int32_t, values)
+        if (xcb_flush(win%conn) > 0) continue
+    end subroutine win_set_background
 
     subroutine win_set_visible(win, visible)
         type(window_t), intent(inout) :: win
