@@ -3,7 +3,8 @@ program test_fortwin
     !! keys type text with and without Shift and report the unshifted character
     !! for shortcuts; the clipboard and the primary selection pass UTF-8 text,
     !! also 100 kB, between two clients; resizing, waking and closing arrive as
-    !! events; dead keys compose accented letters.
+    !! events; dead keys compose accented letters; a window mapped before
+    !! anything is drawn shows its background colour.
     use iso_c_binding, only: c_int, c_char, c_null_char, c_int8_t, c_int32_t
     use fortwin
     use fortwin_xcb, only: xcb_send_event, xcb_cookie_t
@@ -77,6 +78,8 @@ program test_fortwin
     call check(compose_dead(int(z'FE51'), iachar("e")) == 233, "dead acute + e = é")
     call check(compose_dead(int(z'FE52'), iachar(" ")) == 94, "dead circumflex + space = ^")
     call check(compose_dead(int(z'FE50'), iachar("x")) == iachar("x"), "no composition: x")
+
+    call check_background(display)
 
     call win_close(a)
     call win_close(b)
@@ -157,6 +160,38 @@ contains
         close (u, status="delete")
         ok = line == "ok"
     end function peer_reads
+
+    subroutine check_background(display)
+        !! Mapped without any drawing, the window is its background colour (the X
+        !! server paints it; Xvfb has no compositor). Read back with ImageMagick,
+        !! which is skipped where it is missing.
+        character(*), intent(in) :: display
+        type(window_t) :: c
+        character(len=64) :: got, id
+        integer :: st, cs, u
+        call execute_command_line("command -v magick >/dev/null 2>&1", exitstat=st, cmdstat=cs)
+        if (st /= 0 .or. cs /= 0) then
+            write (*, '(a)') "skip: no ImageMagick to read the background back"
+            return
+        end if
+        call check(win_open(c, "fortwin test C", 40, 40, visible=.false.), "window C opens")
+        call win_set_background(c, [1.0, 0.0, 0.0])
+        call win_set_visible(c, .true.)
+        call drain(c)
+        write (id, '(a,z0)') "0x", c%id
+        call execute_command_line("DISPLAY=" // display // " magick x:" // trim(id) // &
+            " -format '%[fx:int(255*p{20,20}.r)],%[fx:int(255*p{20,20}.g)]," // &
+            "%[fx:int(255*p{20,20}.b)]' info: > fortwin-background.txt 2>/dev/null", exitstat=st, cmdstat=cs)
+        got = ""
+        open (newunit=u, file="fortwin-background.txt", action="read", iostat=st)
+        if (st == 0) then
+            read (u, '(a)', iostat=st) got
+            close (u, status="delete")
+        end if
+        call check(trim(got) == "255,0,0", "a mapped window shows its background colour: " // &
+            trim(got))
+        call win_close(c)
+    end subroutine check_background
 
     subroutine check(ok, what)
         logical, intent(in) :: ok
