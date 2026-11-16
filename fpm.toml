@@ -19,3 +19,13 @@ source-form = "free"
 # fast default selection, and .fortyard/check runs it with --all.
 [extra.fo.test-groups]
 slow = { tests = ["test_fortwin"] }
+
+[preprocess]
+cpp.suffixes = ["f90"]
+
+[features]
+platform.macos.preprocess.cpp.macros = ["__APPLE__"]
+platform.windows.preprocess.cpp.macros = ["_WIN32"]
+
+[profiles]
+default = ["platform"]

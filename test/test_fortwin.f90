@@ -1,3 +1,4 @@
+#if !defined(_WIN32) && !defined(__APPLE__)
 program test_fortwin
     !! On an X server (Xvfb started here unless FORTWIN_TEST_DISPLAY names one):
     !! keys type text with and without Shift and report the unshifted character
@@ -331,3 +332,10 @@ contains
     end subroutine send_close
 
 end program test_fortwin
+
+#else
+program test_fortwin
+    implicit none
+    print *, "X11 host tests apply to Linux. Native hosts use test_native."
+end program
+#endif

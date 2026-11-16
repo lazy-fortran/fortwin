@@ -1,10 +1,15 @@
 module fortwin
+    use fortwin_native, only: native_host_abi
+#if defined(_WIN32) || defined(__APPLE__)
+    use fortwin_native
+    implicit none
+    public
+#else
     !! Windows on X11 through libxcb, in Fortran: one window with keyboard
     !! (core keymap with Shift, Caps Lock and AltGr levels, dead keys), pointer,
     !! wheel, clipboard and primary selection (owner and requester, incremental
     !! transfers), title, size, maximisation, visibility, display scale, and a
     !! wait that other threads can end through a pipe.
-    use iso_c_binding
     use iso_fortran_env, only: int8, int16, int32, int64
     use fortwin_xcb
     use fortwin_keys, only: keysym_to_ucs, compose_dead, is_dead_key, WIN_KEY_NONE, &
@@ -908,4 +913,5 @@ contains
         end if
     end function utf8
 
+#endif
 end module fortwin
