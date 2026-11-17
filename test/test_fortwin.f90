@@ -8,7 +8,7 @@ program test_fortwin
     !! anything is drawn shows its background colour.
     use iso_c_binding, only: c_int, c_char, c_null_char, c_int8_t, c_int32_t
     use fortwin
-    use fortwin_xcb, only: xcb_send_event, xcb_cookie_t
+    use fortwin_xcb, only: xcb_send_event, xcb_cookie_t, xcb_destroy_window
     use fortwin_keys, only: compose_dead
     use clip_texts, only: sample
     implicit none
@@ -81,6 +81,7 @@ program test_fortwin
     call check(compose_dead(int(z'FE50'), iachar("x")) == iachar("x"), "no composition: x")
 
     call check_background(display)
+    call check_destroyed_window()
 
     call win_close(a)
     call win_close(b)
@@ -161,6 +162,18 @@ contains
         close (u, status="delete")
         ok = line == "ok"
     end function peer_reads
+
+    subroutine check_destroyed_window()
+        type(window_t) :: c
+        type(xcb_cookie_t) :: ck
+        call check(win_open(c, "fortwin destroyed", 40, 40), "destroy test window opens")
+        call drain(c)
+        ck = xcb_destroy_window(c%conn, c%id)
+        call win_flush(c)
+        call check(wait_for(c, WIN_EV_CLOSE), "destroyed window reports close")
+        call check(.not. c%mapped, "destroyed window is unmapped")
+        call win_close(c)
+    end subroutine check_destroyed_window
 
     subroutine check_background(display)
         !! Mapped without any drawing, the window is its background colour (the X

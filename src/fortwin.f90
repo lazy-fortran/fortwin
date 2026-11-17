@@ -167,10 +167,13 @@ contains
         type(window_t), intent(inout) :: win
         type(xcb_cookie_t) :: ck
         if (.not. c_associated(win%conn)) return
-        ck = xcb_destroy_window(win%conn, win%id)
+        if (win%id /= 0) ck = xcb_destroy_window(win%conn, win%id)
         if (xcb_flush(win%conn) > 0) continue
         call xcb_disconnect(win%conn)
         win%conn = c_null_ptr
+        win%id = 0
+        win%mapped = .false.
+        win%visible = .false.
     end subroutine win_close
 
     integer(c_int32_t) function getpid_c()
@@ -453,6 +456,14 @@ contains
         case (12) ! Expose
             if (u16(b, 16) == 0) then ! last of a series
                 ev%kind = WIN_EV_EXPOSE
+                call push(win, ev)
+            end if
+        case (17) ! DestroyNotify
+            if (transfer(b(9:12), 0_c_int32_t) == win%id) then
+                win%id = 0
+                win%mapped = .false.
+                win%visible = .false.
+                ev%kind = WIN_EV_CLOSE
                 call push(win, ev)
             end if
         case (19) ! MapNotify
