@@ -13,7 +13,7 @@ module fortwin_native
         WIN_EV_TEXT, WIN_EV_LEAVE, WIN_EV_FOCUS_IN, WIN_EV_FOCUS_OUT, WIN_EV_WAKE
     public :: WIN_MOD_SHIFT, WIN_MOD_CTRL, WIN_MOD_ALT, WIN_MOD_META
 
-    public :: win_present_pixels
+    public :: win_present_pixels, win_native_handle
     integer, parameter, public :: native_host_abi = 1
     integer, parameter :: WIN_EV_NONE = 0, WIN_EV_CLOSE = 1, WIN_EV_RESIZE = 2, &
         WIN_EV_EXPOSE = 3, WIN_EV_MOTION = 4, WIN_EV_BUTTON_DOWN = 5, WIN_EV_BUTTON_UP = 6, &
@@ -46,6 +46,10 @@ module fortwin_native
         character(c_char) :: text(64)
     end type
     interface
+        type(c_ptr) function fw_handle(p) bind(C)
+            import c_ptr
+            type(c_ptr), value :: p
+        end function
         type(c_ptr) function fw_open(title, w, h) bind(C)
             import c_ptr, c_char, c_int
             character(c_char), intent(in) :: title(*)
@@ -120,6 +124,11 @@ module fortwin_native
         end function
     end interface
 contains
+    function win_native_handle(win) result(handle)
+        type(window_t), intent(in) :: win
+        type(c_ptr) :: handle
+        handle = fw_handle(win%conn)
+    end function win_native_handle
     logical function win_open(win, title, width, height, visible, class) result(ok)
         type(window_t), intent(out) :: win
         character(*), intent(in) :: title

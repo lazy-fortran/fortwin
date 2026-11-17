@@ -20,7 +20,7 @@ module fortwin
         win_wake, win_set_title, win_set_size, win_set_visible, win_set_background, &
         win_maximize, &
         win_clipboard_set, win_clipboard_get, win_primary_set, win_primary_get, win_flush, &
-        win_mods_down, win_time, win_send_key
+        win_mods_down, win_time, win_send_key, win_native_handle
     public :: WIN_EV_NONE, WIN_EV_CLOSE, WIN_EV_RESIZE, WIN_EV_EXPOSE, WIN_EV_MOTION, &
         WIN_EV_BUTTON_DOWN, WIN_EV_BUTTON_UP, WIN_EV_WHEEL, WIN_EV_KEY_DOWN, WIN_EV_KEY_UP, &
         WIN_EV_TEXT, WIN_EV_LEAVE, WIN_EV_FOCUS_IN, WIN_EV_FOCUS_OUT, WIN_EV_WAKE
@@ -77,6 +77,11 @@ module fortwin
     integer(c_int), save :: wake_fds(2) = -1
 
 contains
+    function win_native_handle(win) result(handle)
+        type(window_t), intent(in) :: win
+        type(c_ptr) :: handle
+        handle = c_null_ptr
+    end function win_native_handle
 
     ! --- opening ---------------------------------------------------------------
 

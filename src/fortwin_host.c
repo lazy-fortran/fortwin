@@ -149,6 +149,7 @@ void fw_wait(void *p,int ms) {
     fw_window *w=p;if(w->head!=w->tail)return;
     MsgWaitForMultipleObjectsEx(1,&wake_event,ms<0?INFINITE:(DWORD)ms,QS_ALLINPUT,MWMO_INPUTAVAILABLE);
 }
+void *fw_handle(void *p) {return p ? ((fw_window*)p)->window : NULL;}
 void fw_wake(void) {if(wake_event)SetEvent(wake_event);}
 void fw_title(void *p,const char *text) {wchar_t *s=wide(text);if(s){SetWindowTextW(((fw_window*)p)->window,s);free(s);}}
 void fw_size(void *p,int width,int height) {RECT r={0,0,width,height};AdjustWindowRect(&r,WS_OVERLAPPEDWINDOW,FALSE);SetWindowPos(((fw_window*)p)->window,NULL,0,0,r.right-r.left,r.bottom-r.top,SWP_NOMOVE|SWP_NOZORDER);}
@@ -204,6 +205,7 @@ typedef struct fw_window {
     struct fw_window *next;
 } fw_window;
 static fw_window *windows;
+void *fw_handle(void *p) {return p ? ((fw_window*)p)->window : NULL;}
 static id held_event;
 static id string(const char *s) {return M1(get_class("NSString"),"stringWithUTF8String:",(id)s);}
 static rect_t bounds(id o, const char *sel) {

@@ -1,5 +1,5 @@
 program test_native
-    use iso_c_binding, only: c_int8_t
+    use iso_c_binding, only: c_int8_t, c_associated
     use fortwin
 #if defined(_WIN32) || defined(__APPLE__)
     implicit none
@@ -12,6 +12,7 @@ program test_native
     if (.not. win_open(w, "Fortwin native test", 320, 240, visible=.false.)) &
         error stop "native window opens"
     if (w%width <= 0 .or. w%height <= 0 .or. w%scale <= 0) error stop "native size"
+    if (.not. c_associated(win_native_handle(w))) error stop "native parent handle"
     allocate(pixels(4,w%width,w%height))
     pixels = 0
     pixels(1,:,:) = 127
@@ -41,6 +42,7 @@ program test_native
     call win_wake()
     call win_wait(w, 0.01)
     call win_close(w)
+    if (c_associated(win_native_handle(w))) error stop "closed parent handle"
     print '(a)', "Native window, bitmap, Unicode clipboard resize and key delivery passed"
 #else
     implicit none
