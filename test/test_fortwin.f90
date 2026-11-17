@@ -81,6 +81,7 @@ program test_fortwin
     call check(compose_dead(int(z'FE50'), iachar("x")) == iachar("x"), "no composition: x")
 
     call check_background(display)
+    call check_pixels(display)
     call check_destroyed_window()
 
     call win_close(a)
@@ -174,6 +175,37 @@ contains
         call check(.not. c%mapped, "destroyed window is unmapped")
         call win_close(c)
     end subroutine check_destroyed_window
+
+    subroutine check_pixels(display)
+        use iso_fortran_env, only: int8
+        character(*), intent(in) :: display
+        type(window_t) :: c
+        integer(int8) :: pixels(4, 40, 40)
+        character(32) :: id
+        character(64) :: got
+        integer :: st, cs, u
+        call execute_command_line("command -v magick >/dev/null 2>&1", exitstat=st, cmdstat=cs)
+        if (st /= 0 .or. cs /= 0) return
+        call check(win_open(c, "CPU first frame", 40, 40, visible=.false.), "pixel window opens")
+        pixels = 0
+        pixels(2,:,:) = -1_int8
+        pixels(4,:,:) = -1_int8
+        call win_present_pixels(c, pixels)
+        call win_set_visible(c, .true.)
+        call drain(c)
+        write(id, '(i0)') c%id
+        call execute_command_line("DISPLAY=" // display // " magick x:" // trim(id) // &
+            " -format '%[fx:int(255*p{20,20}.r)],%[fx:int(255*p{20,20}.g)]," // &
+            "%[fx:int(255*p{20,20}.b)]' info: > fortwin-pixels.txt 2>/dev/null", exitstat=st, cmdstat=cs)
+        got = ""
+        open(newunit=u, file="fortwin-pixels.txt", action="read", iostat=st)
+        if (st == 0) then
+            read(u, '(a)', iostat=st) got
+            close(u, status="delete")
+        end if
+        call check(trim(got) == "0,255,0", "hidden window maps with its completed frame: " // trim(got))
+        call win_close(c)
+    end subroutine
 
     subroutine check_background(display)
         !! Mapped without any drawing, the window is its background colour (the X

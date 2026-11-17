@@ -20,7 +20,7 @@ module fortwin
         win_wake, win_set_title, win_set_size, win_set_visible, win_set_background, &
         win_maximize, &
         win_clipboard_set, win_clipboard_get, win_primary_set, win_primary_get, win_flush, &
-        win_mods_down, win_time, win_send_key, win_native_handle
+        win_mods_down, win_time, win_send_key, win_native_handle, win_present_pixels
     public :: WIN_EV_NONE, WIN_EV_CLOSE, WIN_EV_RESIZE, WIN_EV_EXPOSE, WIN_EV_MOTION, &
         WIN_EV_BUTTON_DOWN, WIN_EV_BUTTON_UP, WIN_EV_WHEEL, WIN_EV_KEY_DOWN, WIN_EV_KEY_UP, &
         WIN_EV_TEXT, WIN_EV_LEAVE, WIN_EV_FOCUS_IN, WIN_EV_FOCUS_OUT, WIN_EV_WAKE
@@ -52,7 +52,7 @@ module fortwin
     type :: window_t
         type(c_ptr) :: conn = c_null_ptr
         integer(c_int32_t) :: id = 0, root = 0
-        integer :: width = 0, height = 0
+        integer :: width = 0, height = 0, depth = 24
         real :: scale = 1.0
         logical :: mapped = .false., visible = .false.
         integer :: mods = 0
@@ -76,7 +76,25 @@ module fortwin
 
     integer(c_int), save :: wake_fds(2) = -1
 
+    interface
+        subroutine xcb_pixels(connection, window, pixels, width, height, depth) &
+                bind(C, name="fortwin_xcb_pixels")
+            import c_ptr, c_int32_t, c_int8_t, c_int
+            type(c_ptr), value :: connection
+            integer(c_int32_t), value :: window
+            integer(c_int8_t), intent(in) :: pixels(*)
+            integer(c_int), value :: width, height, depth
+        end subroutine
+    end interface
+
 contains
+    subroutine win_present_pixels(win, pixels)
+        type(window_t), intent(inout) :: win
+        integer(int8), intent(in), contiguous :: pixels(:, :, :)
+        if (size(pixels, 1) /= 4) return
+        call xcb_pixels(win%conn, win%id, pixels, int(size(pixels, 2), c_int), &
+            int(size(pixels, 3), c_int), int(win%depth, c_int))
+    end subroutine
     function win_native_handle(win) result(handle)
         type(window_t), intent(in) :: win
         type(c_ptr) :: handle
@@ -118,6 +136,7 @@ contains
         call c_f_pointer(it%data, scr, [40])
         win%root = transfer(scr(1:4), win%root)
         visual = transfer(scr(33:36), visual)
+        win%depth = int(scr(39))
         win%id = xcb_generate_id(win%conn)
         ! Background none (no flicker on resize), then the events.
         values = [0_c_int32_t, EVENTS]
