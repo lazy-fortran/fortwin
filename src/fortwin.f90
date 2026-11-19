@@ -756,7 +756,13 @@ contains
         win%down(code) = .false.
         ev%kind = WIN_EV_KEY_UP
         ev%key = named_key(keysym_of(win, code, 0))
-        ev%codepoint = keysym_to_ucs(keysym_of(win, code, 0))
+        if (win%has_xkb) then
+            ev%codepoint = xkb_shortcut_char(win%xkb, code)
+        else
+            ev%codepoint = keysym_to_ucs(keysym_of(win, code, 0))
+        end if
+        if (ev%codepoint >= iachar("A") .and. ev%codepoint <= iachar("Z")) &
+            ev%codepoint = ev%codepoint + 32
         ev%mods = win%mods
         call push(win, ev)
     end subroutine key_release

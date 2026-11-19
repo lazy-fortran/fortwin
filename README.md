@@ -23,8 +23,8 @@ end do
   and libxcb-xkb, also opened at run time: every layout and layout switch,
   Compose sequences of the locale and `~/.XCompose`, auto-repeat recognised. A
   dead key and a character that do not compose type both. Key events carry the
-  unshifted character for shortcuts, the Latin one on a Cyrillic or Greek
-  layout. Without these libraries the core keymap gives Shift, Caps Lock, AltGr,
+  unshifted character for shortcuts: on a Cyrillic or Greek layout the Latin
+  letter of another layout, else of the US layout. Without these libraries the core keymap gives Shift, Caps Lock, AltGr,
   NumLock and the seven Latin-1 dead keys.
 - Clipboard and primary selection as owner and as requester, UTF-8, including
   incremental transfers from other clients.

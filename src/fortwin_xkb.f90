@@ -11,7 +11,18 @@ module fortwin_xkb
         XKB_COMPOSE_COMPOSED = 2, XKB_COMPOSE_CANCELLED = 3
     integer, parameter :: XKB_COMPOSE_FEED_IGNORED = 0
 
+    type, bind(C) :: xkb_rule_names_t
+        type(c_ptr) :: rules = c_null_ptr, model = c_null_ptr, layout = c_null_ptr, &
+            variant = c_null_ptr, options = c_null_ptr
+    end type xkb_rule_names_t
+
     abstract interface
+        type(c_ptr) function fn_keymap_from_names(ctx, names, flags) bind(C)
+            import :: c_ptr, c_int, xkb_rule_names_t
+            type(c_ptr), value :: ctx
+            type(xkb_rule_names_t), intent(in) :: names
+            integer(c_int), value :: flags
+        end function
         type(c_ptr) function fn_ptr_int(flags) bind(C)
             import :: c_ptr, c_int
             integer(c_int), value :: flags
@@ -127,11 +138,13 @@ module fortwin_xkb
     procedure(fn_status), pointer :: xkb_compose_state_get_status => null()
     procedure(fn_compose_utf8), pointer :: xkb_compose_state_get_utf8 => null()
     procedure(fn_select_events), pointer :: xcb_xkb_select_events => null()
+    procedure(fn_keymap_from_names), pointer :: xkb_keymap_new_from_names => null()
 
     type :: xkb_t
         !! A keyboard: its layouts, their state and the Compose sequences of the locale.
         type(c_ptr) :: ctx = c_null_ptr, keymap = c_null_ptr, state = c_null_ptr, &
             table = c_null_ptr, compose = c_null_ptr
+        type(c_ptr) :: us = c_null_ptr ! US keymap: the Latin letter of a key for shortcuts
         integer(c_int32_t) :: device = -1
         integer :: event_base = -1 ! XKB events: event_base, then their kind in byte 2
     end type xkb_t
@@ -172,6 +185,8 @@ contains
         call c_f_procpointer(dlsym(lib, "xkb_keymap_key_get_syms_by_level" // c_null_char), &
             xkb_keymap_key_get_syms_by_level)
         call c_f_procpointer(dlsym(lib, "xkb_keysym_to_utf32" // c_null_char), xkb_keysym_to_utf32)
+        call c_f_procpointer(dlsym(lib, "xkb_keymap_new_from_names" // c_null_char), &
+            xkb_keymap_new_from_names)
         call c_f_procpointer(dlsym(lib, "xkb_compose_table_new_from_locale" // c_null_char), &
             xkb_compose_table_new_from_locale)
         call c_f_procpointer(dlsym(lib, "xkb_compose_table_unref" // c_null_char), xkb_compose_table_unref)
@@ -200,6 +215,8 @@ contains
         type(c_ptr), intent(in) :: conn
         ! NewKeyboardNotify and MapNotify
         integer(c_int16_t), parameter :: EVENTS = 3
+        ! MapNotify is selected per part of the keymap (key types, symbols, modifiers ...).
+        integer(c_int16_t), parameter :: ALL_PARTS = 255
         integer(c_int8_t), target :: base
         type(xcb_cookie_t) :: ck
         ok = .false.
@@ -210,11 +227,12 @@ contains
         k%device = xkb_x11_get_core_keyboard_device_id(conn)
         if (k%device < 0) return
         ck = xcb_xkb_select_events(conn, int(k%device, c_int16_t), EVENTS, 0_c_int16_t, EVENTS, &
-            0_c_int16_t, 0_c_int16_t, c_null_ptr)
+            ALL_PARTS, ALL_PARTS, c_null_ptr)
         if (xcb_flush(conn) > 0) continue
         k%ctx = xkb_context_new(0_c_int)
         if (.not. c_associated(k%ctx)) return
         call compose_open(k)
+        call us_open(k)
         ok = xkb_reload(k, conn)
     end function xkb_open
 
@@ -232,7 +250,6 @@ contains
         k%keymap = keymap
         k%state = xkb_state_new(keymap)
         ok = c_associated(k%state)
-        if (c_associated(k%compose)) call xkb_compose_state_reset(k%compose)
     end function xkb_reload
 
     subroutine compose_open(k)
@@ -254,8 +271,19 @@ contains
         if (c_associated(k%table)) k%compose = xkb_compose_state_new(k%table, 0_c_int)
     end subroutine compose_open
 
+    subroutine us_open(k)
+        !! The US layout, for keys whose layouts have no Latin letter (Russian alone).
+        type(xkb_t), intent(inout) :: k
+        type(xkb_rule_names_t) :: names
+        character(kind=c_char, len=3), target, save :: us = "us" // c_null_char
+        if (.not. associated(xkb_keymap_new_from_names)) return
+        names%layout = c_loc(us)
+        k%us = xkb_keymap_new_from_names(k%ctx, names, 0_c_int)
+    end subroutine us_open
+
     subroutine xkb_close(k)
         type(xkb_t), intent(inout) :: k
+        if (c_associated(k%us)) call xkb_keymap_unref(k%us)
         if (c_associated(k%compose)) call xkb_compose_state_unref(k%compose)
         if (c_associated(k%table)) call xkb_compose_table_unref(k%table)
         if (c_associated(k%state)) call xkb_state_unref(k%state)
@@ -298,7 +326,8 @@ contains
     integer function xkb_shortcut_char(k, code) result(ucs)
         !! The character a shortcut names on this key: the unshifted one of the
         !! current layout, or, where that is no ASCII character (Cyrillic,
-        !! Greek), the first ASCII one of another layout, as GTK does.
+        !! Greek), the first ASCII one of another layout, as GTK does, else the
+        !! US letter of the key.
         type(xkb_t), intent(in) :: k
         integer, intent(in) :: code
         integer :: layout, n
@@ -312,13 +341,18 @@ contains
                 return
             end if
         end do
+        if (.not. c_associated(k%us)) return
+        if (level1(0, k%us) > 32 .and. level1(0, k%us) < 127) ucs = level1(0, k%us)
     contains
-        integer function level1(lay)
+        integer function level1(lay, map)
             integer, intent(in) :: lay
-            type(c_ptr) :: syms
+            type(c_ptr), intent(in), optional :: map
+            type(c_ptr) :: syms, m
             integer(c_int32_t), pointer :: s(:)
             level1 = 0
-            if (xkb_keymap_key_get_syms_by_level(k%keymap, int(code, c_int32_t), &
+            m = k%keymap
+            if (present(map)) m = map
+            if (xkb_keymap_key_get_syms_by_level(m, int(code, c_int32_t), &
                 int(lay, c_int32_t), 0_c_int32_t, syms) < 1) return
             call c_f_pointer(syms, s, [1])
             level1 = int(xkb_keysym_to_utf32(s(1)))

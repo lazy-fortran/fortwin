@@ -367,6 +367,7 @@ contains
         character(*), intent(in) :: display
         integer, parameter :: ACUTE = int(z'FE51'), CIRCUMFLEX = int(z'FE52'), &
             DIAERESIS = int(z'FE57'), RETURN = int(z'FF0D'), ALTGR = 128, LAYOUT2 = 8192
+        integer :: st, cst
         if (.not. layout(display, "us -variant intl")) return
         call win_send_key(a, ACUTE, 0)
         call win_send_key(a, iachar(" "), 0)
@@ -384,6 +385,21 @@ contains
         call win_send_key(a, RETURN, 0)
         call win_send_key(a, iachar("e"), 0)
         call expect_typed(a, "e", "us intl: Return cancels a dead key")
+        call win_send_key(a, ACUTE, 0)
+        if (layout(display, "us -variant intl")) continue
+        call win_send_key(a, iachar("e"), 0)
+        call expect_typed(a, achar(195) // achar(169), "us intl: a keymap change keeps a dead key")
+        if (layout(display, "us")) then
+            ! A key remapped by another client, as xdotool does with a spare keycode.
+            call execute_command_line("xmodmap -display " // display // &
+                " -e 'keycode 8 = dead_acute'", exitstat=st, cmdstat=cst)
+            if (cst == 0 .and. st == 0) then
+                call drain(a)
+                call win_send_key(a, ACUTE, 0)
+                call win_send_key(a, iachar("e"), 0)
+                call expect_typed(a, achar(195) // achar(169), "a key remapped by xmodmap types")
+            end if
+        end if
         if (layout(display, "de")) then
             call win_send_key(a, CIRCUMFLEX, 0)
             call win_send_key(a, iachar(" "), 0)
@@ -405,6 +421,10 @@ contains
             call expect_typed(a, achar(209) // achar(129), "us,ru: second layout types Cyrillic es")
             call win_send_key(a, iachar("c"), LAYOUT2 + 4)
             call expect_shortcut(a, iachar("c"), WIN_MOD_CTRL, "us,ru: Ctrl on Cyrillic es is Ctrl+c")
+        end if
+        if (layout(display, "ru")) then
+            call win_send_key(a, int(z'6D3'), 4)
+            call expect_shortcut(a, iachar("c"), WIN_MOD_CTRL, "ru alone: Ctrl on Cyrillic es is Ctrl+c")
         end if
         if (layout(display, "us -variant dvorak")) then
             call win_send_key(a, iachar("c"), 4)
