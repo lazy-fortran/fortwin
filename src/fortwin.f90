@@ -6,14 +6,15 @@ module fortwin
     public
 #else
     !! Windows on X11 through libxcb, in Fortran: one window with keyboard
-    !! (core keymap with Shift, Caps Lock and AltGr levels, dead keys), pointer,
+    !! (XKB layouts and Compose through libxkbcommon, else the core keymap), pointer,
     !! wheel, clipboard and primary selection (owner and requester, incremental
     !! transfers), title, size, maximisation, visibility, display scale, and a
     !! wait that other threads can end through a pipe.
     use iso_fortran_env, only: int8, int16, int32, int64
     use fortwin_xcb
-    use fortwin_keys, only: keysym_to_ucs, compose_dead, is_dead_key, WIN_KEY_NONE, &
-        named_key
+    use fortwin_xkb
+    use fortwin_keys, only: keysym_to_ucs, compose_dead, dead_alone, is_dead_key, WIN_KEY_NONE, &
+        WIN_KEY_SPACE, named_key
     implicit none
     private
     public :: window_t, win_event_t, win_open, win_close, win_next_event, win_wait, &
@@ -66,6 +67,8 @@ module fortwin
         integer, allocatable :: keysyms(:, :) ! (per_keycode, min_keycode:max_keycode)
         integer :: level3_mask = 0, numlock_mask = 0
         integer :: dead = 0 ! pending dead key keysym
+        type(xkb_t) :: xkb
+        logical :: has_xkb = .false. ! layouts and Compose from libxkbcommon
         logical :: down(0:255) = .false.
         integer(c_int32_t) :: last_time = 0
         ! events read ahead and kept for the caller
@@ -173,6 +176,7 @@ contains
         call win_set_title(win, title)
         win%scale = display_scale(win)
         call load_keymap(win)
+        win%has_xkb = xkb_open(win%xkb, win%conn)
         allocate (win%pending(16))
         win%xfd = xcb_get_file_descriptor(win%conn)
         if (wake_fds(1) < 0) then
@@ -193,6 +197,8 @@ contains
         if (.not. c_associated(win%conn)) return
         if (win%id /= 0) ck = xcb_destroy_window(win%conn, win%id)
         if (xcb_flush(win%conn) > 0) continue
+        call xkb_close(win%xkb)
+        win%has_xkb = .false.
         call xcb_disconnect(win%conn)
         win%conn = c_null_ptr
         win%id = 0
@@ -412,6 +418,14 @@ contains
         call c_f_pointer(p, b, [32])
         kind = iand(int(b(1)), 127)
         detail = iand(int(b(2)), 255)
+        if (win%has_xkb .and. kind == win%xkb%event_base) then
+            ! XKB NewKeyboardNotify or MapNotify: another layout or keymap.
+            if (detail <= 1) then
+                call load_keymap(win)
+                win%has_xkb = xkb_reload(win%xkb, win%conn)
+            end if
+            return
+        end if
         select case (kind)
         case (2, 3) ! KeyPress, KeyRelease
             state = u16(b, 28)
@@ -516,6 +530,7 @@ contains
             end if
         case (34) ! MappingNotify
             call load_keymap(win)
+            if (win%has_xkb) win%has_xkb = xkb_reload(win%xkb, win%conn)
         end select
     end subroutine translate
 
@@ -616,36 +631,123 @@ contains
         integer, intent(in) :: code, state
         logical, intent(in) :: repeat
         type(win_event_t) :: ev
-        integer :: sym, ucs, base
+        integer :: sym, status
+        logical :: typing
+        character(len=:), allocatable :: text
         win%down(code) = .true.
-        sym = keysym_of(win, code, state)
-        base = keysym_of(win, code, 0)
+        if (win%has_xkb) then
+            call xkb_set_state(win%xkb, state)
+            sym = xkb_sym(win%xkb, code)
+            ev%codepoint = xkb_shortcut_char(win%xkb, code)
+        else
+            sym = keysym_of(win, code, state)
+            ev%codepoint = keysym_to_ucs(keysym_of(win, code, 0))
+        end if
         ev%kind = WIN_EV_KEY_DOWN
         ev%key = named_key(sym)
-        ev%codepoint = keysym_to_ucs(base)
         if (ev%codepoint >= iachar("A") .and. ev%codepoint <= iachar("Z")) &
             ev%codepoint = ev%codepoint + 32
         ev%mods = win%mods
         ev%repeat = repeat
-        call push(win, ev)
         ! Text: printable characters without Ctrl, Alt or Super, dead keys composed.
-        if (iand(win%mods, WIN_MOD_CTRL + WIN_MOD_ALT + WIN_MOD_META) /= 0) return
-        if (is_dead_key(sym)) then
-            win%dead = sym
+        typing = iand(win%mods, WIN_MOD_CTRL + WIN_MOD_ALT + WIN_MOD_META) == 0
+        if (.not. typing) then
+            win%dead = 0
+            if (win%has_xkb) call xkb_compose_reset(win%xkb)
+            call push(win, ev)
             return
         end if
-        ucs = keysym_to_ucs(sym)
-        if (ucs < 32 .or. ucs == 127) return
-        if (win%dead /= 0) then
-            ucs = compose_dead(win%dead, ucs)
-            win%dead = 0
+        if (win%has_xkb) then
+            call compose_xkb(win, code, sym, status, text)
+        else
+            call compose_core(win, sym, status, text)
         end if
+        ! A space that completes a dead key is no key of its own.
+        if (status == XKB_COMPOSE_COMPOSED .and. ev%key == WIN_KEY_SPACE) ev%key = WIN_KEY_NONE
+        call push(win, ev)
+        if (len(text) == 0) return
+        if (iachar(text(1:1)) < 32 .or. iachar(text(1:1)) == 127) return
         ev = win_event_t()
         ev%kind = WIN_EV_TEXT
         ev%mods = win%mods
-        ev%text = utf8(ucs)
+        ev%text = text
         call push(win, ev)
     end subroutine key_press
+
+    subroutine compose_xkb(win, code, sym, status, text)
+        !! The text of a key with the Compose sequences of the locale. A dead
+        !! key and a character that do not compose type both, as US
+        !! International does elsewhere; other keys cancel a dead key.
+        type(window_t), intent(inout) :: win
+        integer, intent(in) :: code, sym
+        integer, intent(out) :: status
+        character(len=:), allocatable, intent(out) :: text
+        integer :: dead
+        text = ""
+        status = xkb_feed(win%xkb, sym)
+        select case (status)
+        case (XKB_COMPOSE_NOTHING)
+            text = xkb_text(win%xkb, code)
+        case (XKB_COMPOSE_COMPOSING)
+            ! Remember a lone dead key; a longer sequence has no fallback.
+            win%dead = merge(sym, 0, is_dead(sym) .and. win%dead == 0)
+        case (XKB_COMPOSE_COMPOSED)
+            text = xkb_composed(win%xkb)
+            if (len(text) == 0) text = xkb_text(win%xkb, code)
+            call xkb_compose_reset(win%xkb)
+            win%dead = 0
+        case (XKB_COMPOSE_CANCELLED)
+            dead = win%dead
+            win%dead = 0
+            call xkb_compose_reset(win%xkb)
+            if (dead == 0) return
+            if (is_dead(sym)) then
+                text = xkb_alone(win%xkb, dead)
+                if (xkb_feed(win%xkb, sym) == XKB_COMPOSE_COMPOSING) win%dead = sym
+            else if (named_key(sym) == WIN_KEY_NONE .or. named_key(sym) == WIN_KEY_SPACE) then
+                text = xkb_text(win%xkb, code)
+                if (len(text) > 0) text = xkb_alone(win%xkb, dead) // text
+            end if
+        case default ! a modifier: the sequence goes on
+            status = XKB_COMPOSE_NOTHING
+        end select
+    end subroutine compose_xkb
+
+    subroutine compose_core(win, sym, status, text)
+        !! The text of a key with fortwin's own dead keys (without libxkbcommon).
+        type(window_t), intent(inout) :: win
+        integer, intent(in) :: sym
+        integer, intent(out) :: status
+        character(len=:), allocatable, intent(out) :: text
+        integer :: ucs
+        text = ""
+        status = XKB_COMPOSE_NOTHING
+        ucs = keysym_to_ucs(sym)
+        if (is_dead_key(sym)) then
+            status = XKB_COMPOSE_COMPOSING
+            if (win%dead /= 0) text = utf8(dead_alone(win%dead))
+            win%dead = sym
+        else if (ucs < 32 .or. ucs == 127) then
+            ! Modifiers keep a pending dead key, named keys cancel it.
+            if (named_key(sym) /= WIN_KEY_NONE) win%dead = 0
+        else if (win%dead == 0) then
+            text = utf8(ucs)
+        else
+            status = XKB_COMPOSE_COMPOSED
+            if (ucs == 32 .or. compose_dead(win%dead, ucs) /= ucs) then
+                text = utf8(compose_dead(win%dead, ucs))
+            else
+                text = utf8(dead_alone(win%dead)) // utf8(ucs)
+            end if
+            win%dead = 0
+        end if
+    end subroutine compose_core
+
+    pure logical function is_dead(sym)
+        !! Any dead keysym (dead_grave .. dead_greek and the newer ones).
+        integer, intent(in) :: sym
+        is_dead = sym >= int(z'FE50') .and. sym <= int(z'FE93')
+    end function is_dead
 
     subroutine key_release(win, code)
         type(window_t), intent(inout) :: win

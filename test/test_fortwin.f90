@@ -9,7 +9,7 @@ program test_fortwin
     use iso_c_binding, only: c_int, c_char, c_null_char, c_int8_t, c_int32_t
     use fortwin
     use fortwin_xcb, only: xcb_send_event, xcb_cookie_t, xcb_destroy_window
-    use fortwin_keys, only: compose_dead
+    use fortwin_keys, only: compose_dead, WIN_KEY_SPACE
     use clip_texts, only: sample
     implicit none
     interface
@@ -79,6 +79,7 @@ program test_fortwin
     call check(compose_dead(int(z'FE51'), iachar("e")) == 233, "dead acute + e = é")
     call check(compose_dead(int(z'FE52'), iachar(" ")) == 94, "dead circumflex + space = ^")
     call check(compose_dead(int(z'FE50'), iachar("x")) == iachar("x"), "no composition: x")
+    if (own_server) call check_layouts(display)
 
     call check_background(display)
     call check_pixels(display)
@@ -360,6 +361,90 @@ contains
         end do
         call check(down .and. up .and. .not. text, what)
     end subroutine expect_shortcut
+
+    subroutine check_layouts(display)
+        !! Dead keys, AltGr, a second layout and shortcuts on international layouts.
+        character(*), intent(in) :: display
+        integer, parameter :: ACUTE = int(z'FE51'), CIRCUMFLEX = int(z'FE52'), &
+            DIAERESIS = int(z'FE57'), RETURN = int(z'FF0D'), ALTGR = 128, LAYOUT2 = 8192
+        if (.not. layout(display, "us -variant intl")) return
+        call win_send_key(a, ACUTE, 0)
+        call win_send_key(a, iachar(" "), 0)
+        call expect_typed(a, "'", "us intl: dead acute + space = ' without a space key")
+        call win_send_key(a, DIAERESIS, 1)
+        call win_send_key(a, iachar(" "), 0)
+        call expect_typed(a, '"', 'us intl: dead diaeresis + space = " without a space key')
+        call win_send_key(a, ACUTE, 0)
+        call win_send_key(a, iachar("e"), 0)
+        call expect_typed(a, achar(195) // achar(169), "us intl: dead acute + e = e acute")
+        call win_send_key(a, ACUTE, 0)
+        call win_send_key(a, iachar("t"), 0)
+        call expect_typed(a, "'t", "us intl: dead acute + t = 't")
+        call win_send_key(a, ACUTE, 0)
+        call win_send_key(a, RETURN, 0)
+        call win_send_key(a, iachar("e"), 0)
+        call expect_typed(a, "e", "us intl: Return cancels a dead key")
+        if (layout(display, "de")) then
+            call win_send_key(a, CIRCUMFLEX, 0)
+            call win_send_key(a, iachar(" "), 0)
+            call expect_typed(a, "^", "de: dead circumflex + space = ^")
+            call win_send_key(a, CIRCUMFLEX, 0)
+            call win_send_key(a, iachar("a"), 0)
+            call expect_typed(a, achar(195) // achar(162), "de: dead circumflex + a = a circumflex")
+            call win_send_key(a, 228, 0)
+            call expect_typed(a, achar(195) // achar(164), "de: a umlaut key")
+            call win_send_key(a, iachar("@"), ALTGR)
+            call expect_typed(a, "@", "de: AltGr+q = @")
+        end if
+        if (layout(display, "pl")) then
+            call win_send_key(a, int(z'1B1'), ALTGR)
+            call expect_typed(a, achar(196) // achar(133), "pl: AltGr+a = a ogonek")
+        end if
+        if (layout(display, "us,ru")) then
+            call win_send_key(a, iachar("c"), LAYOUT2)
+            call expect_typed(a, achar(209) // achar(129), "us,ru: second layout types Cyrillic es")
+            call win_send_key(a, iachar("c"), LAYOUT2 + 4)
+            call expect_shortcut(a, iachar("c"), WIN_MOD_CTRL, "us,ru: Ctrl on Cyrillic es is Ctrl+c")
+        end if
+        if (layout(display, "us -variant dvorak")) then
+            call win_send_key(a, iachar("c"), 4)
+            call expect_shortcut(a, iachar("c"), WIN_MOD_CTRL, "dvorak: Ctrl+c by its letter")
+        end if
+        if (layout(display, "us")) continue
+    end subroutine check_layouts
+
+    logical function layout(display, args) result(ok)
+        !! The keyboard layout of the test server, and the window's keymap reloaded.
+        character(*), intent(in) :: display, args
+        integer :: st, cst
+        st = 1
+        call execute_command_line("setxkbmap -display " // display // " " // args, exitstat=st, &
+            cmdstat=cst)
+        ok = cst == 0 .and. st == 0
+        if (.not. ok) write (*, '(a)') "skipped: setxkbmap " // args
+        call drain(a)
+    end function layout
+
+    subroutine expect_typed(w, want, what)
+        !! The text `want`, and no space key pressed while typing it.
+        type(window_t), intent(inout) :: w
+        character(*), intent(in) :: want, what
+        type(win_event_t) :: ev
+        character(len=:), allocatable :: got
+        logical :: space
+        real(8) :: t
+        got = ""
+        space = .false.
+        t = win_time()
+        do while (win_time() - t < 0.5d0)
+            do while (win_next_event(w, ev))
+                if (ev%kind == WIN_EV_TEXT) got = got // ev%text
+                if (ev%kind == WIN_EV_KEY_DOWN .and. ev%key == WIN_KEY_SPACE) space = .true.
+            end do
+            call win_wait(w, 0.05)
+        end do
+        call check(got == want .and. .not. space, what // " (got '" // got // "')")
+    end subroutine expect_typed
 
     subroutine send_close(w)
         !! The WM_DELETE_WINDOW message a window manager sends.

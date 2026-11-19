@@ -19,9 +19,13 @@ do
 end do
 ```
 
-- Keyboard from the server's core keymap: Shift, Caps Lock and AltGr levels,
-  keypad with NumLock, dead keys composed into accented letters, auto-repeat
-  recognised; key events carry the unshifted character for shortcuts.
+- Keyboard from the server's XKB keymap through libxkbcommon, libxkbcommon-x11
+  and libxcb-xkb, also opened at run time: every layout and layout switch,
+  Compose sequences of the locale and `~/.XCompose`, auto-repeat recognised. A
+  dead key and a character that do not compose type both. Key events carry the
+  unshifted character for shortcuts, the Latin one on a Cyrillic or Greek
+  layout. Without these libraries the core keymap gives Shift, Caps Lock, AltGr,
+  NumLock and the seven Latin-1 dead keys.
 - Clipboard and primary selection as owner and as requester, UTF-8, including
   incremental transfers from other clients.
 - `win_wake` (callable from any thread, also from C) ends a `win_wait`.

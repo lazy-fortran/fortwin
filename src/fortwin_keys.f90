@@ -2,7 +2,7 @@ module fortwin_keys
     !! X keysyms: named keys, Unicode characters and dead-key composition.
     implicit none
     private
-    public :: keysym_to_ucs, named_key, is_dead_key, compose_dead
+    public :: keysym_to_ucs, named_key, is_dead_key, compose_dead, dead_alone
 
     integer, parameter, public :: WIN_KEY_NONE = 0, WIN_KEY_ENTER = 1, WIN_KEY_ESCAPE = 2, &
         WIN_KEY_BACKSPACE = 3, WIN_KEY_TAB = 4, WIN_KEY_SPACE = 5, WIN_KEY_DELETE = 6, &
@@ -13,8 +13,9 @@ module fortwin_keys
     ! Dead keys: grave, acute, circumflex, tilde, diaeresis, ring, cedilla.
     integer, parameter :: DEAD(7) = [int(z'FE50'), int(z'FE51'), int(z'FE52'), int(z'FE53'), &
         int(z'FE57'), int(z'FE58'), int(z'FE5B')]
-    ! The spacing character each dead key types alone.
-    integer, parameter :: DEAD_ALONE(7) = [96, 180, 94, 126, 168, 176, 184]
+    ! The spacing character each dead key types alone, as X's Compose tables
+    ! give it before a space: ASCII where there is one.
+    integer, parameter :: SPACING(7) = [96, 39, 94, 126, 34, 176, 184]
     ! Bases and their composed characters, per dead key (Latin-1 and Latin Extended-A).
     character(*), parameter :: BASES(7) = [character(24) :: "AEIOUaeiou", "AEIOUYaeiouyCcNnSsZz", &
         "AEIOUaeiou", "ANOanoIiUu", "AEIOUaeiouy", "AaUu", "CcSs"]
@@ -94,6 +95,16 @@ contains
         is_dead_key = any(DEAD == sym)
     end function is_dead_key
 
+    pure integer function dead_alone(sym) result(ucs)
+        !! The spacing character of a dead key, 0 for other keysyms.
+        integer, intent(in) :: sym
+        integer :: d
+        ucs = 0
+        do d = 1, size(DEAD)
+            if (DEAD(d) == sym) ucs = SPACING(d)
+        end do
+    end function dead_alone
+
     pure integer function compose_dead(dead_sym, ucs) result(out)
         !! A dead key followed by a character: the composed character, the
         !! accent alone before a space, else the character itself.
@@ -103,7 +114,7 @@ contains
         do d = 1, size(DEAD)
             if (DEAD(d) /= dead_sym) cycle
             if (ucs == 32) then
-                out = DEAD_ALONE(d)
+                out = SPACING(d)
                 return
             end if
             do j = 1, len_trim(BASES(d))
