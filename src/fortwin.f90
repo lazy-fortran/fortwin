@@ -56,6 +56,11 @@ module fortwin
         integer :: width = 0, height = 0, depth = 24
         real :: scale = 1.0
         logical :: mapped = .false., visible = .false.
+        ! The background the X server paints (-1: none), and whether a frame
+        ! stands in for it until the window is mapped. The server tiles that
+        ! frame over any larger area, such as a maximized window's.
+        integer(c_int32_t) :: back_pixel = -1
+        logical :: frame_background = .false., maximize_on_map = .false.
         integer :: mods = 0
         ! atoms
         integer(c_int32_t) :: a_protocols = 0, a_delete = 0, a_clipboard = 0, a_primary = 1, &
@@ -80,13 +85,13 @@ module fortwin
     integer(c_int), save :: wake_fds(2) = -1
 
     interface
-        subroutine xcb_pixels(connection, window, pixels, width, height, depth) &
+        subroutine xcb_pixels(connection, window, pixels, width, height, depth, background) &
                 bind(C, name="fortwin_xcb_pixels")
             import c_ptr, c_int32_t, c_int8_t, c_int
             type(c_ptr), value :: connection
             integer(c_int32_t), value :: window
             integer(c_int8_t), intent(in) :: pixels(*)
-            integer(c_int), value :: width, height, depth
+            integer(c_int), value :: width, height, depth, background
         end subroutine
     end interface
 
@@ -96,8 +101,28 @@ contains
         integer(int8), intent(in), contiguous :: pixels(:, :, :)
         if (size(pixels, 1) /= 4) return
         call xcb_pixels(win%conn, win%id, pixels, int(size(pixels, 2), c_int), &
-            int(size(pixels, 3), c_int), int(win%depth, c_int))
+            int(size(pixels, 3), c_int), int(win%depth, c_int), &
+            merge(1_c_int, 0_c_int, .not. win%visible))
+        if (.not. win%visible) win%frame_background = .true.
     end subroutine
+
+    subroutine restore_background(win)
+        !! The background colour again in place of a frame.
+        type(window_t), intent(inout) :: win
+        integer(c_int32_t) :: values(1)
+        type(xcb_cookie_t) :: ck
+        if (.not. win%frame_background) return
+        win%frame_background = .false.
+        if (win%back_pixel >= 0) then
+            values(1) = win%back_pixel
+            ck = xcb_change_window_attributes(win%conn, win%id, 2_c_int32_t, values) ! CW_BACK_PIXEL
+        else
+            values(1) = 0
+            ck = xcb_change_window_attributes(win%conn, win%id, 1_c_int32_t, values) ! None
+        end if
+        if (xcb_flush(win%conn) > 0) continue
+    end subroutine restore_background
+
     function win_native_handle(win) result(handle)
         type(window_t), intent(in) :: win
         type(c_ptr) :: handle
@@ -253,6 +278,8 @@ contains
         type(xcb_cookie_t) :: ck
         c = nint(255.0 * max(0.0, min(1.0, rgb)))
         values(1) = int(c(1) * 65536 + c(2) * 256 + c(3), c_int32_t)
+        win%back_pixel = values(1)
+        win%frame_background = .false.
         ! CW_BACK_PIXEL
         ck = xcb_change_window_attributes(win%conn, win%id, 2_c_int32_t, values)
         if (xcb_flush(win%conn) > 0) continue
@@ -264,6 +291,8 @@ contains
         type(xcb_cookie_t) :: ck
         if (visible .eqv. win%visible) return
         if (visible) then
+            ! The window manager sizes a maximized window before mapping it.
+            if (win%maximize_on_map) call restore_background(win)
             ck = xcb_map_window(win%conn, win%id)
         else
             ck = xcb_unmap_window(win%conn, win%id)
@@ -280,6 +309,7 @@ contains
         integer(c_int8_t) :: ev(32)
         type(xcb_cookie_t) :: ck
         if (.not. win%visible) then
+            win%maximize_on_map = .true.
             states = [win%a_max_v, win%a_max_h]
             ck = xcb_change_property(win%conn, 0_c_int8_t, win%id, win%a_net_state, 4_c_int32_t, &
                 32_c_int8_t, 2_c_int32_t, c_loc(states))
@@ -506,6 +536,8 @@ contains
             end if
         case (19) ! MapNotify
             win%mapped = .true.
+            ! Resizes uncover the background colour, not copies of the frame.
+            call restore_background(win)
         case (18) ! UnmapNotify
             win%mapped = .false.
         case (22) ! ConfigureNotify

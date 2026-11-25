@@ -5,7 +5,8 @@ program test_fortwin
     !! for shortcuts; the clipboard and the primary selection pass UTF-8 text,
     !! also 100 kB, between two clients; resizing, waking and closing arrive as
     !! events; dead keys compose accented letters; a window mapped before
-    !! anything is drawn shows its background colour.
+    !! anything is drawn shows its background colour; a frame drawn while the
+    !! window was hidden is not tiled over a resized or maximized window.
     use iso_c_binding, only: c_int, c_char, c_null_char, c_int8_t, c_int32_t
     use fortwin
     use fortwin_xcb, only: xcb_send_event, xcb_cookie_t, xcb_destroy_window
@@ -83,6 +84,7 @@ program test_fortwin
 
     call check_background(display)
     call check_pixels(display)
+    call check_frame_not_tiled(display)
     call check_destroyed_window()
 
     call win_close(a)
@@ -207,6 +209,73 @@ contains
         call check(trim(got) == "0,255,0", "hidden window maps with its completed frame: " // trim(got))
         call win_close(c)
     end subroutine
+
+    subroutine check_frame_not_tiled(display)
+        !! A green frame drawn while hidden on a red background: a resize after
+        !! mapping uncovers red, a window maximized on mapping maps red (the
+        !! window manager would size it first), and frames drawn once mapped
+        !! still show.
+        use iso_fortran_env, only: int8
+        character(*), intent(in) :: display
+        type(window_t) :: c
+        integer(int8) :: pixels(4, 40, 40)
+        integer :: st, cs
+        call execute_command_line("command -v magick >/dev/null 2>&1", exitstat=st, cmdstat=cs)
+        if (st /= 0 .or. cs /= 0) return
+        pixels = 0
+        pixels(2, :, :) = -1_int8
+        pixels(4, :, :) = -1_int8
+        call check(win_open(c, "resized frame", 40, 40, visible=.false.), "frame window opens")
+        call win_set_background(c, [1.0, 0.0, 0.0])
+        call win_present_pixels(c, pixels)
+        call win_set_visible(c, .true.)
+        call drain(c)
+        call win_set_size(c, 80, 80)
+        call check(wait_for(c, WIN_EV_RESIZE), "frame window resized")
+        call drain(c)
+        call check(pixel_at(display, c, 60, 60) == "255,0,0", &
+            "a resize uncovers the background, not the frame: " // pixel_at(display, c, 60, 60))
+        pixels(2, :, :) = 0
+        pixels(3, :, :) = -1_int8
+        call win_present_pixels(c, pixels)
+        call drain(c)
+        call check(pixel_at(display, c, 20, 20) == "0,0,255", &
+            "a frame drawn on the mapped window shows: " // pixel_at(display, c, 20, 20))
+        call win_close(c)
+
+        call check(win_open(c, "maximized frame", 40, 40, visible=.false.), "maximized window opens")
+        call win_set_background(c, [1.0, 0.0, 0.0])
+        call win_present_pixels(c, pixels)
+        call win_maximize(c)
+        call win_set_visible(c, .true.)
+        call drain(c)
+        call check(pixel_at(display, c, 20, 20) == "255,0,0", &
+            "a window maximized on mapping maps in its background: " // pixel_at(display, c, 20, 20))
+        call win_close(c)
+    end subroutine check_frame_not_tiled
+
+    function pixel_at(display, w, x, y) result(got)
+        !! "r,g,b" of the window's pixel, read back with ImageMagick.
+        character(*), intent(in) :: display
+        type(window_t), intent(in) :: w
+        integer, intent(in) :: x, y
+        character(len=:), allocatable :: got
+        character(len=64) :: line, id, at
+        integer :: st, cs, u
+        write (id, '(i0)') w%id
+        write (at, '(i0,a,i0)') x, ",", y
+        call execute_command_line("DISPLAY=" // display // " magick x:" // trim(id) // &
+            " -format '%[fx:int(255*p{" // trim(at) // "}.r)],%[fx:int(255*p{" // trim(at) // &
+            "}.g)],%[fx:int(255*p{" // trim(at) // "}.b)]' info: > fortwin-pixel-at.txt 2>/dev/null", &
+            exitstat=st, cmdstat=cs)
+        line = ""
+        open (newunit=u, file="fortwin-pixel-at.txt", action="read", iostat=st)
+        if (st == 0) then
+            read (u, '(a)', iostat=st) line
+            close (u, status="delete")
+        end if
+        got = trim(line)
+    end function pixel_at
 
     subroutine check_background(display)
         !! Mapped without any drawing, the window is its background colour (the X

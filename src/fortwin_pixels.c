@@ -21,6 +21,8 @@ static cookie (*free_pixmap)(void *, uint32_t);
 static cookie (*attributes)(void *, uint32_t, uint32_t, const uint32_t *);
 static cookie (*clear_area)(void *, uint8_t, uint32_t, int16_t, int16_t,
                             uint16_t, uint16_t);
+static cookie (*copy_area)(void *, uint32_t, uint32_t, uint32_t, int16_t,
+                           int16_t, int16_t, int16_t, uint16_t, uint16_t);
 static int load(void) {
   if (library)
     return 1;
@@ -44,12 +46,14 @@ static int load(void) {
   LOAD(free_pixmap, "xcb_free_pixmap");
   LOAD(attributes, "xcb_change_window_attributes");
   LOAD(clear_area, "xcb_clear_area");
+  LOAD(copy_area, "xcb_copy_area");
   library = lib;
   return 1;
 #undef LOAD
 }
 void fortwin_xcb_pixels(void *connection, uint32_t window, const uint8_t *rgba,
-                        int width, int height, int depth) {
+                        int width, int height, int depth,
+                        int background) {
   if (!connection || !window || width <= 0 || height <= 0 || depth != 24 ||
       !load())
     return;
@@ -80,9 +84,15 @@ void fortwin_xcb_pixels(void *connection, uint32_t window, const uint8_t *rgba,
               (int16_t)y, 0, 24, (uint32_t)(n * width * 4),
               (const uint8_t *)pixels);
   }
-  /* A hidden window maps directly to its completed first frame. */
-  attributes(connection, window, 1, &pixmap);
-  clear_area(connection, 0, window, 0, 0, (uint16_t)width, (uint16_t)height);
+  if (background) {
+    /* A hidden window maps directly to its completed first frame. */
+    attributes(connection, window, 1, &pixmap);
+    clear_area(connection, 0, window, 0, 0, (uint16_t)width,
+               (uint16_t)height);
+  } else {
+    copy_area(connection, pixmap, window, gc, 0, 0, 0, 0, (uint16_t)width,
+              (uint16_t)height);
+  }
   free_gc(connection, gc);
   free_pixmap(connection, pixmap);
   flush(connection);
