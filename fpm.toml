@@ -16,7 +16,7 @@ implicit-external = false
 source-form = "free"
 
 # plain fpm ignores this; fo leaves the test needing an X server out of its
-# fast default selection, and .fortyard/check runs it with --all.
+# fast default selection, and .github/ci/check runs it with --all.
 [extra.fo.test-groups]
 slow = { tests = ["test_fortwin"] }
 
